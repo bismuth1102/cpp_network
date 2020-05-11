@@ -8,6 +8,7 @@
 #include <libgen.h>
 #include <unistd.h>
 #include <boost/asio.hpp>
+#include <boost/algorithm/string.hpp>
 #include <mutex>
 
 #include "hashlist.h"
@@ -146,16 +147,21 @@ string get_node_to_hash(pHash_List plist, string data)
 void init_hash(pHash_List plist)
 {
   string data;
-  data = "www\nqq";
-  insert_node_to_hash(plist, data);
-  data = "waaa\nqaaaq";
-  insert_node_to_hash(plist, data);
-  data = "qavqw\nqasdfsq";
-  insert_node_to_hash(plist, data);
-  data = "qaqw\nqa";
-  insert_node_to_hash(plist, data);
-  data = "qaa2qw\nq22a";
-  insert_node_to_hash(plist, data);
+  fstream file;
+  file.open("data.log", ios::in);
+  if (file.peek()!=EOF) {
+    while(!file.eof()){
+      file >> data;
+      cout << data << endl;
+      u32 position = data.find(";");
+      string key = data.substr(0, position);
+      string value = data.substr(position+1);
+      string str = key+"\n"+value;
+      insert_node_to_hash(plist, str);
+    }
+  }
+  file.close();
+
 }
 
 

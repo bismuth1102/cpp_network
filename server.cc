@@ -12,7 +12,7 @@ using boost::asio::ip::tcp;
 using namespace std;
 
 //server run hashtable; thread work on this hashtable
-pHash_List plist = init_hash_list();  
+pHash_List plist = init_hash_list();
 int get_succ=0, get_fail=0, put_succ=0, put_fail=0;
 
 class TCPConnection : public std::enable_shared_from_this<TCPConnection> 
@@ -85,7 +85,19 @@ private:
 			if (command == "PUT")
 			{
 				response = insert_node_to_hash(plist, data);
-				(response == "OK" || response == "UPDATED") ? put_succ++ : put_fail++;
+				if (response == "OK" || response == "UPDATED") {
+					put_succ++;
+					position = data.find("\n");
+  					string key = data.substr(0, position);
+  					string value = data.substr(position+1);
+					fstream file;
+					file.open("data.log", ios::out | ios::app);
+					file << key << ";" << value << endl;
+					file.close();
+				}
+				else{
+					put_fail++;
+				}
 				cout << "PUT_SUCC = " << put_succ << "\tPUT_FAIL = " << put_fail 
 					 << "\tGET_SUCC = " << get_succ << "\tGET_FAIL = " << get_fail << endl;
 			}
@@ -169,21 +181,23 @@ int main(int argc, char *argv[])
 {
 	using namespace std;
 
-	size_t port = 40300, num_thread = 3;
+	size_t port = 40300, num_thread = 2;
 
 	int o;
-  while ((o = getopt(argc, argv, "p:t:")) != -1) {
-    switch (o) {
-      case 'p':
-      port = atoi(optarg);
-      break;
-      case 't':
-      num_thread = atoi(optarg);
-      break;
-      default:
-      break;
-    }
-  }
+	while ((o = getopt(argc, argv, "p:t:")) != -1) {
+	    switch (o) {
+	        case 'p':
+	        port = atoi(optarg);
+	        break;
+	      	case 't':
+	      	num_thread = atoi(optarg);
+	      	break;
+	      	default:
+	      	break;
+	    }
+	}
+
+	init_hash(plist);
 
 	// //Get port as size_t from argv
 	// ifstream in("DHTConfig");

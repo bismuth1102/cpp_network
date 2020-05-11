@@ -23,13 +23,13 @@ class DHTClient
 public:
 
   // DHTClient():socket_(create_socket("localhost", "40300")){socket_.close();}
-  DHTClient(string port_){   // initialize with DHTClient
+  DHTClient(bool test_mode, string port_){   // initialize with DHTClient
     ifstream in("DHTConfig");
     if (in.is_open())
     {
       for (string str; getline(in, str) ;)
       { 
-        if (str.find("IP")!=str.npos)
+        if (!test_mode && str.find("IP")!=str.npos)
         {
           str = str.substr(str.find("=")+1);
           boost::split(server_list_, str, boost::is_any_of(","));
@@ -37,7 +37,13 @@ public:
       }
       in.close();
     }
-    num_server_ = server_list_.size();
+    num_server_ = test_mode ? 0 : server_list_.size();
+    if (test_mode)
+    {
+      server_list_.push_back("localhost");
+      socket_.push_back(create_socket(server_list_[0], port_));
+    }
+
     for(vector<string>::iterator itor = server_list_.begin();itor!=server_list_.end();++itor){
         cout<<*itor<<endl;
     }
@@ -166,6 +172,42 @@ class dataGenerator
 public:
   dataGenerator(int num_server):key_(""),num_server_(num_server){}
 
+  string command_test(){
+    string data, key, value;
+    cout<<"Client: ";
+    getline(cin, data);
+
+    // ******* PUT *******
+    if (data == "PUT")
+    {
+      cout << "KEY:";
+      getline(cin, key);
+      cout << "VAL:";
+      getline(cin, value);
+      // PUT\nkey\nvalue
+      data = "PUT\n" + key + "\n" + value;
+    }
+    // ******* GET *******
+    else if (data == "GET")
+    {
+      cout << "KEY:";
+      getline(cin, key);
+      // GET\nkey
+      data = data + "\n" + key;
+    }
+    // ******* SHOW / INIT *******
+    else if (data == "SHOW" || data == "INIT")
+    {
+      data = data + "\n";
+    }
+    // ******* EXIT *******
+    else if (data == "EXIT")
+    {
+      return "EXIT";
+    }
+    return data;
+  }
+
   string command(int cmd, int length_key){
     int length_value;
     string data, key, value;
@@ -175,11 +217,25 @@ public:
     value = random_str(length_value);
     key_ = key;
 
-    if (cmd==1||cmd==2)
+    if (cmd==1)
     { //put
       data = "PUT\n" + key + "\n" + value;
       cout << "PUT " << key << " " << value << endl;
     }
+    // else if (cmd==2)
+    // { //mul_put
+    //   data = "PUT\n" + key + "\n" + value + ",";
+    //   cout << "PUT " << key << " " << value << endl;
+    //   key = random_str(length_key);
+    //   value = random_str(length_value);
+    //   data += "PUT\n" + key + "\n" + value + ",";
+    //   cout << "PUT " << key << " " << value << endl;
+    //   key = random_str(length_key);
+    //   value = random_str(length_value);
+    //   data += "PUT\n" + key + "\n" + value;
+    //   cout << "PUT " << key << " " << value << endl;
+
+    // }
     else if (cmd==3)
     { //get
       data = "GET\n" + key;
@@ -231,107 +287,123 @@ private:
 };
 
 
-void client_concurrence(string port, int key_len){
+int client_main(string port="40300", int num_command=10, int key_len=3, bool test_mode=false) {
+  string data;
+  //string server_name = "localhost";
+
+   // START
+  auto starttime = high_resolution_clock::now();
+  
   int numServer;
-  DHTClient client(port);
+  DHTClient client(test_mode, port);
   numServer = client.get_num_server_();
   dataGenerator dataGen(numServer);
-
-  string data;
-  int cmd; // 0: put; 1: mul_put; 2: get
-  int serverID;
-
-  int temp = rand()%10+1;
-  if (temp<=2) cmd = 1; //put
-  else if(temp<=4) cmd = 2; //mul_put
-  else cmd = 3; //get
-
-  if (cmd==1)
-  {
-    data = dataGen.command(cmd, key_len);
-    serverID = dataGen.pickServer();
-    string str1, str2;
-
+  /**********************************************/
+  /* test mode: only communicate with localhost */
+  /**********************************************/
+  if (test_mode)      
+  {  
     while(true){
-      str1 = client.send_message("LOCK\n", serverID);
-      str2 = client.send_message("LOCK\n", (serverID+1)%numServer);
-
-      cout << "Server" << serverID << ":" << str1 << " " << "Server" << (serverID+1)%numServer << ":" << str2 << endl;
-
-      if ( str1 == "GO" && str2 == "GO")
+      data = dataGen.command_test(); 
+      if (data == "EXIT")
       {
-        cout << "Server" << serverID << " " << client.send_message(data, serverID) << endl;
-        cout << "Server" << (serverID+1)%numServer << " " << client.send_message(data, (serverID+1)%numServer) << endl;
-        client.send_message("UNLOCK\n", serverID);
-        client.send_message("UNLOCK\n", (serverID+1)%numServer);
         break;
-      }
-      else if (str1 == "GO"){
-        client.send_message("UNLOCK\n", serverID);
-      }
-      else if (str2 == "GO"){
-        client.send_message("UNLOCK\n", (serverID+1)%numServer);
-      }
+      } 
+      cout << "SERVER: " << client.send_message(data) << endl;;
     }
+  }
+  /**********************************************/
+  /********** communicate with the DHT **********/
+  /**********************************************/
+  else      
+  {  
+    int cmd; // 0: put; 1: mul_put; 2: get
+    int serverID;
+    string keyID;
     
-  }
-  else if (cmd==2)
-  {
-    int i = 0;
-    while(i<3){
-      data = dataGen.command(cmd, key_len);
-      serverID = dataGen.pickServer();
-      string str1, str2;
+    srand((unsigned)time(NULL));
 
-      str1 = client.send_message("LOCK\n", serverID);
-      str2 = client.send_message("LOCK\n", (serverID+1)%numServer);
+    for (int i = 0; i < num_command; ++i)
+    {
+      int temp = rand()%10+1;
+      if (temp<=2) cmd = 1; //put
+      else if(temp<=4) cmd = 2; //mul_put
+      else cmd = 3; //get
 
-      cout << "Server" << serverID << ":" << str1 << " " << "Server" << (serverID+1)%numServer << ":" << str2 << endl;
-
-      if ( str1 == "GO" && str2 == "GO")
+      if (cmd==1)
       {
-        cout << "Server" << serverID << " " << client.send_message(data, serverID) << endl;
-        cout << "Server" << (serverID+1)%numServer << " " << client.send_message(data, (serverID+1)%numServer) << endl;
-        client.send_message("UNLOCK\n", serverID);
-        client.send_message("UNLOCK\n", (serverID+1)%numServer);
-        i++;
+        data = dataGen.command(cmd, key_len);
+        serverID = dataGen.pickServer();
+        string str1, str2;
+
+        while(true){
+          str1 = client.send_message("LOCK\n", serverID);
+          str2 = client.send_message("LOCK\n", (serverID+1)%numServer);
+
+          cout << "Server" << serverID << ":" << str1 << " " << "Server" << (serverID+1)%numServer << ":" << str2 << endl;
+
+          if ( str1 == "GO" && str2 == "GO")
+          {
+            cout << "Server" << serverID << " " << client.send_message(data, serverID) << endl;
+            cout << "Server" << (serverID+1)%numServer << " " << client.send_message(data, (serverID+1)%numServer) << endl;
+            client.send_message("UNLOCK\n", serverID);
+            client.send_message("UNLOCK\n", (serverID+1)%numServer);
+            break;
+          }
+          else if (str1 == "GO"){
+            client.send_message("UNLOCK\n", serverID);
+          }
+          else if (str2 == "GO"){
+            client.send_message("UNLOCK\n", (serverID+1)%numServer);
+          }
+        }
+        
       }
-      else if (str1 == "GO"){
-        client.send_message("UNLOCK\n", serverID);
+      else if (cmd==2)
+      {
+        vector<string> dataset; 
+        boost::split(dataset, data, boost::is_any_of(","));
+        for (int i = 0; i < 3; ++i)
+        {
+          data = dataset[i];
+          string str1, str2;
+
+          while(true){
+            str1 = client.send_message("LOCK\n", serverID);
+            str2 = client.send_message("LOCK\n", (serverID+1)%numServer);
+
+            cout << "Server" << serverID << ":" << str1 << " " << "Server" << (serverID+1)%numServer << ":" << str2 << endl;
+
+            if ( str1 == "GO" && str2 == "GO")
+            {
+              cout << "Server" << serverID << " " << client.send_message(data, serverID) << endl;
+              cout << "Server" << (serverID+1)%numServer << " " << client.send_message(data, (serverID+1)%numServer) << endl;
+              client.send_message("UNLOCK\n", serverID);
+              client.send_message("UNLOCK\n", (serverID+1)%numServer);
+              break;
+            }
+            else if (str1 == "GO"){
+              client.send_message("UNLOCK\n", serverID);
+            }
+            else if (str2 == "GO"){
+              client.send_message("UNLOCK\n", (serverID+1)%numServer);
+            }
+          }
+        }
       }
-      else if (str2 == "GO"){
-        client.send_message("UNLOCK\n", (serverID+1)%numServer);
+      else{
+        cout << client.send_message(data, serverID) << endl;
       }
+      
     }
   }
-  else{
-    data = dataGen.command(cmd, key_len);
-    serverID = dataGen.pickServer();
-    cout << client.send_message(data, serverID) << endl;
-  }
-  client.close_socket();
-}
-
-
-int client_main(string port, int num_command, int key_len) {
-
-  // START
-  auto starttime = high_resolution_clock::now();
-
-  srand((unsigned)time(NULL));
-
-  boost::asio::thread_pool tp(2);
-  for (int i = 0; i < num_command; ++i)
-  {
-    boost::asio::post(tp, boost::bind(client_concurrence, port, key_len));
-  }
-  tp.join();
-  
   cout << "Total execute time: " << throughput.count() << endl;
 
   auto endtime = high_resolution_clock::now();
   duration<double> total_time = duration_cast<duration<double>>(endtime - starttime);
   cout << "Total time: " << total_time.count() << endl;
+
+  client.close_socket();
 
   ofstream throughput_file("throughput", ios::app);
   ofstream latency_file("latency", ios::app);
@@ -345,14 +417,14 @@ int client_main(string port, int num_command, int key_len) {
   return 0;
 }
 
-
 int main(int argc, char *argv[]){
   string port = "40300";
+  bool test_mode = false;
   //string server_name = "localhost";
   int num_command = 10, key_len = 3;
 
   int o;
-  while ((o = getopt(argc, argv, "p:c:l:")) != -1) {
+  while ((o = getopt(argc, argv, "p:c:l:t")) != -1) {
     switch (o) {
       case 'p':
       port = string(optarg);
@@ -363,12 +435,21 @@ int main(int argc, char *argv[]){
       case 'l':
       key_len = atoi(optarg);
       break;
+      case 't':
+      test_mode = true;
+      break;
       default:
       break;
     }
   }
 
-  client_main(port, num_command, key_len);
+  boost::asio::thread_pool tp(3);
+
+  for(int i=0; i<5; ++i) {
+    boost::asio::post(tp, boost::bind(client_main, port, num_command, key_len, test_mode));
+  }
+
+  tp.join();
 
   return 0;
 
